@@ -510,6 +510,26 @@ pub fn swapped_ratio(key: &str, doc_w: f64, doc_h: f64) -> Option<String> {
     Some(format!("{}:{}", crate::widgets::fmt_num(h), crate::widgets::fmt_num(w)))
 }
 
+/// What the options-bar W and H ratio fields keep after an edit (#3145): both numbers, zeros
+/// included, so a width typed before its height (or either side alone) stays in its field instead
+/// of snapping back to 0 on the next frame. A ratio with a zero side constrains nothing
+/// ([`preset_ratio`] drops it, as does [`swapped_ratio`]); both sides empty clears the ratio.
+/// Anything not a finite, non-negative number counts as 0.
+pub fn ratio_fields_key(w: f64, h: f64) -> String {
+    let clean = |v: f64| if v.is_finite() && v > 0.0 { v } else { 0.0 };
+    let (w, h) = (clean(w), clean(h));
+    if w == 0.0 && h == 0.0 {
+        return String::new();
+    }
+    format!("{}:{}", crate::widgets::fmt_num(w), crate::widgets::fmt_num(h))
+}
+
+/// Whether `key` is a ratio typed into the W and H fields rather than a dropdown entry: the
+/// dropdown then reads "Ratio", as in Photoshop, instead of showing no entry.
+pub fn is_custom_ratio(key: &str, dropdown: &[(String, &str)]) -> bool {
+    !key.is_empty() && !dropdown.iter().any(|(k, _)| k == key) && crate::chrome_ui::crop_ratio(key, 0.0, 0.0).is_some()
+}
+
 /// X: swaps the pending frame between portrait and landscape about its centre, keeping its angle,
 /// and swaps the options-bar ratio with it, as in Photoshop. Returns false when the Crop tool
 /// doesn't take the keys ([`takes_keys`]), so X swaps the colours as usual.
@@ -1420,6 +1440,31 @@ mod tests {
         empty.ui.tool = Tool::Crop;
         drag(&mut empty, &[[1.0, 1.0], [9.0, 9.0]], NONE);
         assert!(empty.ui.crop_rect.is_none());
+    }
+
+    /// #3145: a ratio typed one field at a time stays; a half ratio constrains nothing.
+    #[test]
+    fn typed_ratio_keeps_a_half_filled_pair() {
+        assert_eq!(ratio_fields_key(4.0, 0.0), "4:0", "a width typed before its height");
+        assert_eq!(ratio_fields_key(0.0, 5.0), "0:5");
+        assert_eq!(ratio_fields_key(4.0, 5.0), "4:5");
+        assert_eq!(ratio_fields_key(2.5, 3.0), "2.5:3");
+        assert_eq!(ratio_fields_key(0.0, 0.0), "", "both empty clears the ratio");
+        assert_eq!(ratio_fields_key(f64::NAN, -1.0), "");
+        assert_eq!(ratio_fields_key(f64::INFINITY, 3.0), "0:3");
+        // Reading the fields back gives the same numbers: the pair survives a frame.
+        assert_eq!(crate::chrome_ui::crop_ratio("4:0", 0.0, 0.0), Some((4.0, 0.0)));
+        let mut app = app(SampleType::U8);
+        app.ui.tool_options.crop_ratio = ratio_fields_key(4.0, 0.0);
+        assert_eq!(preset_ratio(&app), None, "a half ratio doesn't constrain the frame");
+        assert_eq!(swapped_ratio("4:0", 1.0, 1.0), None);
+        app.ui.tool_options.crop_ratio = ratio_fields_key(4.0, 5.0);
+        assert_eq!(preset_ratio(&app), Some(0.8));
+        // The dropdown reads "Ratio" for typed numbers, and names its own entries.
+        let d = crate::crop_size::dropdown_options();
+        assert!(is_custom_ratio("4:5", &d) && is_custom_ratio("4:0", &d));
+        assert!(!is_custom_ratio("16:9", &d) && !is_custom_ratio("", &d) && !is_custom_ratio("original", &d));
+        assert!(!is_custom_ratio(crate::crop_size::WHR, &d) && !is_custom_ratio("nonsense", &d));
     }
 
     /// #1792: outside the frame the turn cursor bends towards the corner of the pointer's quadrant
