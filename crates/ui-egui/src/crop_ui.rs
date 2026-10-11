@@ -1462,7 +1462,8 @@ mod tests {
         assert_eq!(preset_ratio(&app), Some(0.8));
         // The dropdown reads "Ratio" for typed numbers, and names its own entries.
         let d = crate::crop_size::dropdown_options();
-        assert!(is_custom_ratio("4:5", &d) && is_custom_ratio("4:0", &d));
+        assert!(is_custom_ratio("4:3", &d) && is_custom_ratio("4:0", &d));
+        assert!(!is_custom_ratio("4:5", &d), "typed numbers that match a preset show its entry");
         assert!(!is_custom_ratio("16:9", &d) && !is_custom_ratio("", &d) && !is_custom_ratio("original", &d));
         assert!(!is_custom_ratio(crate::crop_size::WHR, &d) && !is_custom_ratio("nonsense", &d));
     }
