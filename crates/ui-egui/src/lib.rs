@@ -304,9 +304,18 @@ pub type CursorPosFn = Box<dyn FnMut(&egui::Context) -> Option<egui::Pos2>>;
 /// Whether Caps Lock is toggled on, read from the OS. `None` where the platform cannot
 /// report it (native Wayland): the cursor then follows the cursor preference (#1758).
 pub type CapsLockFn = Box<dyn FnMut() -> bool>;
-/// Keeps an undecorated window's OS frame from offsetting its content and pointer (#2246).
-/// Called once per frame; `None` when the window is decorated or the platform needs no fixing.
-pub type WindowFrameFn = Box<dyn FnMut()>;
+/// Keeps an undecorated window's OS frame from offsetting its content and pointer (#2246), and a
+/// maximized one on the monitor's work area rather than under the taskbar (#3144). Called once per
+/// frame; `None` when the window is decorated or the platform needs no fixing.
+pub type WindowFrameFn = Box<dyn FnMut(WindowFrameState)>;
+
+/// What the shell knows about its window when [`WindowFrameFn`] runs.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct WindowFrameState {
+    /// The window is in (borderless) full screen, where it covers the whole monitor, taskbar
+    /// included, on purpose: the maximized-window placement fix must leave it alone.
+    pub fullscreen: bool,
+}
 
 /// Platform services injected by the app binary (file dialogs, codecs), keeping this crate free of
 /// I/O dependencies.
@@ -1409,9 +1418,11 @@ impl eframe::App for PhotocraftApp {
 
     fn raw_input_hook(&mut self, ctx: &egui::Context, raw_input: &mut egui::RawInput) {
         // An undecorated window gets its caption back when the toolkit changes its flags
-        // (maximize, restore, …): take it off again before the frame is laid out (#2246).
+        // (maximize, restore, …): take it off again before the frame is laid out (#2246), and
+        // move a maximized window off the taskbar, where Windows puts one without a caption (#3144).
         if let Some(window_frame) = self.services.window_frame.as_mut() {
-            window_frame();
+            let fullscreen = raw_input.viewports.get(&raw_input.viewport_id).and_then(|v| v.fullscreen).unwrap_or(false);
+            window_frame(WindowFrameState { fullscreen });
         }
         // Native menu key equivalents become the key presses they were (see `native_menu`).
         if let Some(menu) = self.services.native_menu.as_mut() {
